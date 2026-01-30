@@ -4,11 +4,12 @@ A Telegram bot that monitors appointment availability at the Gdansk office and s
 
 ## Features
 
-- 🔄 Automatic periodic checking (every 5 minutes by default)
+- 🔄 Automatic periodic checking (every 10-15 minutes with random intervals)
 - 📢 Instant notifications when appointments are available
 - 👥 Multiple user support
 - 🎯 Manual availability checks
-- ⚙️ Easy configuration
+- ⚙️ Easy configuration via .env file
+- 🔐 Secure token management
 
 ## Setup
 
@@ -26,11 +27,17 @@ pip install -r requirements.txt
 
 ### 3. Configure the Bot
 
-Edit `booking_monitor_bot.py` and replace:
-```python
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+1. Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
 ```
-with your actual bot token.
+
+2. Edit `.env` and add your bot token:
+```
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN_HERE
+```
+
+**Never commit `.env` file to version control** - it's already in `.gitignore`
 
 ### 4. Run the Bot
 
@@ -57,7 +64,7 @@ chmod +x booking_monitor_bot.py
 
 You can adjust these settings in the script:
 
-- `CHECK_INTERVAL` - Time between checks (in seconds, default: 300 = 5 minutes)
+- `CHECK_INTERVAL` - Time between checks (in seconds, randomly set between 10-15 minutes)
 - `API_URL` - The booking API endpoint (already configured)
 
 ## Running as a Service
@@ -99,7 +106,8 @@ sudo systemctl status booking-bot
 
 ## Notes
 
-- The bot checks the booking API every 5 minutes by default
+- The bot checks the booking API every 10-15 minutes with randomized intervals
 - All subscribers receive notifications when availability is detected
 - The bot only sends notifications when the API response is not empty
 - Logs are displayed in the console for monitoring
+- Bot token is stored in `.env` file (excluded from version control)

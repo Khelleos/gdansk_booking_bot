@@ -6,14 +6,22 @@ Sends a notification when appointments become available.
 import asyncio
 import logging
 import ssl
+import random
+import os
 from datetime import datetime
 import aiohttp
+from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+# Load environment variables from .env file
+load_dotenv()
+
 # Configuration
-TELEGRAM_BOT_TOKEN = "8559276274:AAEv9su-Io6YbMzsEdOJXOGdsSB6I9WGWzg"  # Replace with your bot token
-CHECK_INTERVAL = 300  # Check every 5 minutes (in seconds)
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")
+CHECK_INTERVAL = random.randint(600, 900)  # Check every 10-15 minutes (in seconds)
 API_URL = "https://rezerwacja.gdansk.uw.gov.pl:8445/qmaticwebbooking/rest/schedule/branches/1cf1e3e60eeb96dae2bb572487249bd48cc5bed0024960eaee0c893ce4918569/dates;servicePublicId=2c5251d564aaf0b09c2a39d69cf7ed4cb1e142ab3a501b4b688e1e7c2d80b8e0;customSlotLength=40"
 
 # Set up logging
@@ -47,6 +55,8 @@ async def check_availability_loop():
 
 async def check_availability():
     """Check the booking API for availability and notify subscribers."""
+    global CHECK_INTERVAL
+    
     try:
         # Create SSL context that doesn't verify certificates
         ssl_context = ssl.create_default_context()
@@ -86,11 +96,19 @@ async def check_availability():
                         logger.info("No availability found (empty response)")
                 else:
                     logger.warning(f"API returned status code: {response.status}")
+        
+        # Update check interval after each API call
+        CHECK_INTERVAL = random.randint(600, 900)
+        logger.info(f"Updated check interval to {CHECK_INTERVAL} seconds ({CHECK_INTERVAL/60:.1f} minutes)")
                     
     except asyncio.TimeoutError:
         logger.error("Request timeout while checking availability")
+        # Update check interval even on timeout
+        CHECK_INTERVAL = random.randint(600, 900)
     except Exception as e:
         logger.error(f"Error checking availability: {e}")
+        # Update check interval even on error
+        CHECK_INTERVAL = random.randint(600, 900)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
