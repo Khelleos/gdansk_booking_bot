@@ -8,6 +8,7 @@ import logging
 import ssl
 import random
 import os
+import json
 from datetime import datetime
 import aiohttp
 from dotenv import load_dotenv
@@ -73,13 +74,24 @@ async def check_availability():
                     if data:
                         logger.info(f"Availability found! Data: {data}")
                         
+                        # Parse dates from data
+                        dates_text = ""
+                        try:
+                            if isinstance(data, list) and len(data) > 0:
+                                dates = [item.get('date', '') for item in data if item.get('date')]
+                                if dates:
+                                    dates_text = f"<b>Available dates:</b>\n" + "\n".join([f"• {date}" for date in dates]) + "\n\n"
+                        except Exception as e:
+                            logger.warning(f"Error parsing dates: {e}")
+                        
                         # Send notification to all subscribers
                         for chat_id in list(subscribers):
                             try:
                                 message = (
                                     "🎉 <b>Booking Availability Alert!</b>\n\n"
                                     "New appointments are available at Gdansk office.\n\n"
-                                    f"Check the website now: https://rezerwacja.gdansk.uw.gov.pl/\n\n"
+                                    f"{dates_text}"
+                                    f"Check the website now: https://rezerwacja.gdansk.uw.gov.pl:8445//\n\n"
                                     f"<i>Found at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
                                 )
                                 await bot_instance.send_message(
@@ -155,9 +167,20 @@ async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     data = await response.json()
                     
                     if data:
+                        # Parse dates from data
+                        dates_text = ""
+                        try:
+                            if isinstance(data, list) and len(data) > 0:
+                                dates = [item.get('date', '') for item in data if item.get('date')]
+                                if dates:
+                                    dates_text = f"\n<b>Available dates:</b>\n" + "\n".join([f"• {date}" for date in dates])
+                        except Exception as e:
+                            logger.warning(f"Error parsing dates: {e}")
+                        
                         await update.message.reply_text(
-                            "✅ Appointments are available!\n"
-                            "Check the website: https://rezerwacja.gdansk.uw.gov.pl/"
+                            f"✅ Appointments are available!{dates_text}\n\n"
+                            "Check the website: https://rezerwacja.gdansk.uw.gov.pl/",
+                            parse_mode='HTML'
                         )
                     else:
                         await update.message.reply_text(
