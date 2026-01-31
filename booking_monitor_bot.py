@@ -8,12 +8,21 @@ import logging
 import ssl
 import random
 import os
-import json
 from datetime import datetime
 import aiohttp
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from subscribers import (
+    load_subscribers,
+    save_subscribers,
+    add_subscriber,
+    remove_subscriber,
+    is_subscriber,
+    get_subscribers,
+    get_subscriber_count,
+    remove_blocked_subscriber
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -31,9 +40,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
-
-# Store chat IDs of users who want notifications
-subscribers = set()
 
 # Global variable to store the bot instance
 bot_instance = None
@@ -105,7 +111,7 @@ async def check_availability():
                             logger.warning(f"Error parsing dates and times: {e}")
                         
                         # Send notification to all subscribers
-                        for chat_id in list(subscribers):
+                        for chat_id in list(get_subscribers()):
                             try:
                                 message = (
                                     "🎉 <b>Booking Availability Alert!</b>\n\n"
@@ -122,7 +128,7 @@ async def check_availability():
                             except Exception as e:
                                 logger.error(f"Error sending message to {chat_id}: {e}")
                                 if "Forbidden" in str(e) or "blocked" in str(e).lower():
-                                    subscribers.discard(chat_id)
+                                    remove_blocked_subscriber(chat_id)
                                     logger.info(f"Removed blocked subscriber: {chat_id}")
                     else:
                         logger.info("No availability found (empty response)")
@@ -146,7 +152,7 @@ async def check_availability():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /start command."""
     chat_id = update.effective_chat.id
-    subscribers.add(chat_id)
+    add_subscriber(chat_id)
     
     await update.message.reply_text(
         "👋 Welcome to the Gdansk Booking Monitor Bot!\n\n"
@@ -157,16 +163,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/check - Manually check availability now\n"
         "/status - Check bot status"
     )
-    logger.info(f"New subscriber: {chat_id} (Total: {len(subscribers)})")
 
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /stop command."""
     chat_id = update.effective_chat.id
-    if chat_id in subscribers:
-        subscribers.remove(chat_id)
+    if remove_subscriber(chat_id):
         await update.message.reply_text("You have been unsubscribed from notifications.")
-        logger.info(f"Subscriber removed: {chat_id} (Total: {len(subscribers)})")
     else:
         await update.message.reply_text("You are not currently subscribed.")
 
@@ -226,12 +229,12 @@ async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle the /status command."""
     chat_id = update.effective_chat.id
-    is_subscribed = chat_id in subscribers
+    is_subscribed = is_subscriber(chat_id)
     
     status_text = (
         f"🤖 <b>Bot Status</b>\n\n"
         f"Subscribed: {'✅ Yes' if is_subscribed else '❌ No'}\n"
-        f"Total subscribers: {len(subscribers)}\n"
+        f"Total subscribers: {get_subscriber_count()}\n"
         f"Check interval: {CHECK_INTERVAL} seconds\n"
         f"Current time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
     )
@@ -243,6 +246,9 @@ async def post_init(application: Application):
     """Initialize after the application starts."""
     global bot_instance, check_task
     bot_instance = application.bot
+    
+    # Load subscribers from file
+    load_subscribers()
     
     # Start the background check loop
     check_task = asyncio.create_task(check_availability_loop())
