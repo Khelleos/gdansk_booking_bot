@@ -40,6 +40,18 @@ bot_instance = None
 check_task = None
 
 
+async def fetch_times_for_date(session, date: str):
+    """Fetch available times for a specific date."""
+    try:
+        times_url = f"https://rezerwacja.gdansk.uw.gov.pl:8445/qmaticwebbooking/rest/schedule/branches/1cf1e3e60eeb96dae2bb572487249bd48cc5bed0024960eaee0c893ce4918569/dates/{date}/times;servicePublicId=2c5251d564aaf0b09c2a39d69cf7ed4cb1e142ab3a501b4b688e1e7c2d80b8e0;customSlotLength=40"
+        async with session.get(times_url, timeout=10) as response:
+            if response.status == 200:
+                return await response.json()
+    except Exception as e:
+        logger.warning(f"Error fetching times for date {date}: {e}")
+    return []
+
+
 async def check_availability_loop():
     """Continuously check the booking API for availability."""
     await asyncio.sleep(10)  # Initial delay
@@ -74,15 +86,23 @@ async def check_availability():
                     if data:
                         logger.info(f"Availability found! Data: {data}")
                         
-                        # Parse dates from data
-                        dates_text = ""
+                        # Parse dates and fetch times for each date
+                        dates_times_text = ""
                         try:
                             if isinstance(data, list) and len(data) > 0:
                                 dates = [item.get('date', '') for item in data if item.get('date')]
                                 if dates:
-                                    dates_text = f"<b>Available dates:</b>\n" + "\n".join([f"• {date}" for date in dates]) + "\n\n"
+                                    dates_times_text = "<b>Available slots:</b>\n"
+                                    for date in dates:
+                                        times = await fetch_times_for_date(session, date)
+                                        if times:
+                                            times_list = [item.get('time', '') for item in times if item.get('time')]
+                                            if times_list:
+                                                dates_times_text += f"\n<b>{date}</b>\n" + "\n".join([f"  • {time}" for time in times_list[:5]]) + "\n"
+                                                if len(times_list) > 5:
+                                                    dates_times_text += f"  ... and {len(times_list) - 5} more\n"
                         except Exception as e:
-                            logger.warning(f"Error parsing dates: {e}")
+                            logger.warning(f"Error parsing dates and times: {e}")
                         
                         # Send notification to all subscribers
                         for chat_id in list(subscribers):
@@ -90,7 +110,7 @@ async def check_availability():
                                 message = (
                                     "🎉 <b>Booking Availability Alert!</b>\n\n"
                                     "New appointments are available at Gdansk office.\n\n"
-                                    f"{dates_text}"
+                                    f"{dates_times_text}\n"
                                     f"Check the website now: https://rezerwacja.gdansk.uw.gov.pl:8445//\n\n"
                                     f"<i>Found at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
                                 )
@@ -167,18 +187,26 @@ async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     data = await response.json()
                     
                     if data:
-                        # Parse dates from data
-                        dates_text = ""
+                        # Parse dates and fetch times for each date
+                        dates_times_text = ""
                         try:
                             if isinstance(data, list) and len(data) > 0:
                                 dates = [item.get('date', '') for item in data if item.get('date')]
                                 if dates:
-                                    dates_text = f"\n<b>Available dates:</b>\n" + "\n".join([f"• {date}" for date in dates])
+                                    dates_times_text = "\n<b>Available slots:</b>\n"
+                                    for date in dates:
+                                        times = await fetch_times_for_date(session, date)
+                                        if times:
+                                            times_list = [item.get('time', '') for item in times if item.get('time')]
+                                            if times_list:
+                                                dates_times_text += f"\n<b>{date}</b>\n" + "\n".join([f"  • {time}" for time in times_list[:5]]) + "\n"
+                                                if len(times_list) > 5:
+                                                    dates_times_text += f"  ... and {len(times_list) - 5} more\n"
                         except Exception as e:
-                            logger.warning(f"Error parsing dates: {e}")
+                            logger.warning(f"Error parsing dates and times: {e}")
                         
                         await update.message.reply_text(
-                            f"✅ Appointments are available!{dates_text}\n\n"
+                            f"✅ Appointments are available!{dates_times_text}\n\n"
                             "Check the website: https://rezerwacja.gdansk.uw.gov.pl/",
                             parse_mode='HTML'
                         )
