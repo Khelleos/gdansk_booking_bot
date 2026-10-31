@@ -1,5 +1,4 @@
 import asyncio
-import html
 import logging
 import ssl
 import random
@@ -7,16 +6,20 @@ import os
 from datetime import datetime
 import aiohttp
 from dotenv import load_dotenv
-from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import BotCommand, BotCommandScopeChat, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
+import messages
 from subscribers import (
     load_subscribers,
     add_subscriber,
     remove_subscriber,
     is_subscriber,
+    get_language,
+    set_language,
     get_subscribers,
     get_subscriber_count
 )
+from translations import DEFAULT_LANGUAGE, LANGUAGES
 
 load_dotenv()
 
@@ -26,18 +29,10 @@ if not TELEGRAM_BOT_TOKEN:
 CHECK_INTERVAL = random.randint(600, 900)
 API_URL = "https://rezerwacja.gdansk.uw.gov.pl:8445/qmaticwebbooking/rest/schedule/branches/1cf1e3e60eeb96dae2bb572487249bd48cc5bed0024960eaee0c893ce4918569/dates;servicePublicId=2c5251d564aaf0b09c2a39d69cf7ed4cb1e142ab3a501b4b688e1e7c2d80b8e0;customSlotLength=40"
 BOOKING_SITE_URL = "https://rezerwacja.gdansk.uw.gov.pl:8445/qmaticwebbooking/"
-# Telegram rejects messages over 4096 characters; leave room for the header and footer
-MAX_SLOTS_TEXT_LENGTH = 3500
 
-BOT_COMMANDS = [
-    BotCommand("start", "Start receiving notifications"),
-    BotCommand("check", "Check availability now"),
-    BotCommand("status", "Bot status and next check time"),
-    BotCommand("stop", "Stop receiving notifications"),
-]
-
-OPEN_SITE_BUTTON = InlineKeyboardButton("📅 Open booking site", url=BOOKING_SITE_URL)
-CHECK_AGAIN_BUTTON = InlineKeyboardButton("🔄 Check again", callback_data="check")
+LANGUAGE_KEYBOARD = InlineKeyboardMarkup(
+    [[InlineKeyboardButton(name, callback_data=f"lang:{code}")] for code, name in LANGUAGES.items()]
+)
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -50,10 +45,32 @@ logger = logging.getLogger(__name__)
 bot_instance = None
 check_task = None
 
-# State of the background loop, shown by /status
+# State of the background loop, shown by /status.
+# last_check_result is a (result, dates) pair for messages.check_result_label
 last_check_at = None
 last_check_result = None
 next_check_at = None
+
+
+def bot_commands(lang):
+    return [BotCommand(command, description) for command, description in messages.command_descriptions(lang)]
+
+
+def open_site_button(lang):
+    return InlineKeyboardButton(messages.open_site_button(lang), url=BOOKING_SITE_URL)
+
+
+def check_again_button(lang):
+    return InlineKeyboardButton(messages.check_again_button(lang), callback_data="check")
+
+
+def chat_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Saved subscriber language, then a choice made while unsubscribed, then the Telegram app language."""
+    lang = get_language(update.effective_chat.id) or context.chat_data.get('language')
+    if lang:
+        return lang
+    user = update.effective_user
+    return messages.detect_language(user.language_code if user else None)
 
 
 async def fetch_times_for_date(session, date: str):
@@ -94,42 +111,6 @@ async def fetch_slots():
         return slots
 
 
-def format_date(date: str) -> str:
-    try:
-        d = datetime.strptime(date, '%Y-%m-%d')
-    except ValueError:
-        return date
-    return f"{d:%a}, {d.day} {d:%b %Y}"
-
-
-def format_slots(slots: dict) -> str:
-    """Render slots as HTML: one bold date per block, times in a collapsed blockquote."""
-    parts = []
-    length = 0
-    for i, (date, times) in enumerate(slots.items()):
-        if times:
-            times_text = "\n".join(html.escape(t) for t in times)
-            part = (
-                f"<b>{html.escape(format_date(date))}</b> · {len(times)} slot{'s' if len(times) != 1 else ''}\n"
-                f"<blockquote expandable>{times_text}</blockquote>"
-            )
-        else:
-            part = f"<b>{html.escape(format_date(date))}</b>\n<i>times unavailable</i>"
-        if length + len(part) > MAX_SLOTS_TEXT_LENGTH:
-            parts.append(f"<i>…and {len(slots) - i} more dates on the website</i>")
-            break
-        parts.append(part)
-        length += len(part)
-    return "\n\n".join(parts)
-
-
-def format_duration(seconds: float) -> str:
-    minutes = round(seconds / 60)
-    if minutes < 1:
-        return "less than a minute"
-    return f"{minutes} min"
-
-
 async def check_availability_loop():
     global next_check_at
     next_check_at = datetime.now().timestamp() + 10
@@ -155,21 +136,19 @@ async def check_availability():
         slots = await fetch_slots()
         if slots:
             logger.info(f"Availability found! Slots: {slots}")
-            last_check_result = f"✅ slots found ({len(slots)} dates)"
+            last_check_result = ("found", len(slots))
 
-            message = (
-                "🎉 <b>Booking Availability Alert!</b>\n\n"
-                "New appointments are available at Gdansk office.\n\n"
-                f"{format_slots(slots)}\n\n"
-                f"<i>Found at: {last_check_at.strftime('%Y-%m-%d %H:%M:%S')}</i>"
-            )
-            for chat_id in list(get_subscribers()):
+            # Render each language once, not once per subscriber
+            alerts = {}
+            for chat_id, lang in get_subscribers().items():
+                if lang not in alerts:
+                    alerts[lang] = messages.availability_alert(lang, slots, last_check_at)
                 try:
                     await bot_instance.send_message(
                         chat_id=chat_id,
-                        text=message,
+                        text=alerts[lang],
                         parse_mode='HTML',
-                        reply_markup=InlineKeyboardMarkup([[OPEN_SITE_BUTTON]])
+                        reply_markup=InlineKeyboardMarkup([[open_site_button(lang)]])
                     )
                 except Exception as e:
                     logger.error(f"Error sending message to {chat_id}: {e}")
@@ -177,13 +156,13 @@ async def check_availability():
                         remove_subscriber(chat_id)
         else:
             logger.info("No availability found (empty response)")
-            last_check_result = "no slots"
+            last_check_result = ("none", 0)
     except asyncio.TimeoutError:
         logger.error("Request timeout while checking availability")
-        last_check_result = "⚠️ request timed out"
+        last_check_result = ("timeout", 0)
     except Exception as e:
         logger.error(f"Error checking availability: {e}")
-        last_check_result = "⚠️ error"
+        last_check_result = ("error", 0)
 
     CHECK_INTERVAL = random.randint(600, 900)
     logger.info(f"Updated check interval to {CHECK_INTERVAL} seconds ({CHECK_INTERVAL/60:.1f} minutes)")
@@ -191,92 +170,103 @@ async def check_availability():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    add_subscriber(chat_id)
-
-    await update.message.reply_text(
-        "👋 Welcome to the Gdansk Booking Monitor Bot!\n\n"
-        "I will notify you when new appointment slots become available.\n\n"
-        "Commands (also in the Menu button):\n"
-        "/start - Start receiving notifications\n"
-        "/stop - Stop receiving notifications\n"
-        "/check - Manually check availability now\n"
-        "/status - Check bot status"
-    )
+    lang = chat_language(update, context)
+    add_subscriber(chat_id, lang)
+    await update.message.reply_text(messages.welcome(lang))
 
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
+    lang = chat_language(update, context)
+    # Remember the language until restart in case the chat subscribes again
+    context.chat_data['language'] = lang
     if remove_subscriber(chat_id):
-        await update.message.reply_text("You have been unsubscribed from notifications.")
+        await update.message.reply_text(messages.unsubscribed(lang))
     else:
-        await update.message.reply_text("You are not currently subscribed.")
+        await update.message.reply_text(messages.not_subscribed(lang))
 
 
-async def show_check_result(message):
+async def show_check_result(message, lang):
     """Run a manual check and edit `message` to show the result."""
     try:
         slots = await fetch_slots()
     except Exception as e:
         logger.error(f"Error in manual check: {e}")
         await message.edit_text(
-            f"❌ Error checking availability: {html.escape(str(e) or type(e).__name__)}",
+            messages.check_error(lang, str(e) or type(e).__name__),
             parse_mode='HTML',
-            reply_markup=InlineKeyboardMarkup([[CHECK_AGAIN_BUTTON]])
+            reply_markup=InlineKeyboardMarkup([[check_again_button(lang)]])
         )
         return
 
-    checked_at = f"<i>Checked at: {datetime.now().strftime('%H:%M:%S')}</i>"
     if slots:
-        text = f"✅ <b>Appointments are available!</b>\n\n{format_slots(slots)}\n\n{checked_at}"
-        keyboard = [[OPEN_SITE_BUTTON], [CHECK_AGAIN_BUTTON]]
+        keyboard = [[open_site_button(lang)], [check_again_button(lang)]]
     else:
-        text = f"❌ No appointments available at the moment.\n\n{checked_at}"
-        keyboard = [[CHECK_AGAIN_BUTTON]]
-    await message.edit_text(text, parse_mode='HTML', reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard = [[check_again_button(lang)]]
+    await message.edit_text(
+        messages.check_result(lang, slots, datetime.now()),
+        parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 
 async def check_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    message = await update.message.reply_text("🔍 Checking availability...")
-    await show_check_result(message)
+    lang = chat_language(update, context)
+    message = await update.message.reply_text(messages.checking(lang))
+    await show_check_result(message, lang)
 
 
 async def check_again(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    message = await query.edit_message_text("🔍 Checking availability...")
-    await show_check_result(message)
+    lang = chat_language(update, context)
+    message = await query.edit_message_text(messages.checking(lang))
+    await show_check_result(message, lang)
 
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    is_subscribed = is_subscriber(chat_id)
-    now = datetime.now()
-
-    if last_check_at:
-        last_check = f"{format_duration((now - last_check_at).total_seconds())} ago — {last_check_result}"
-    else:
-        last_check = "not yet"
-    if next_check_at:
-        next_check = f"in ~{format_duration(max(0, next_check_at - now.timestamp()))}"
-    else:
-        next_check = "unknown"
-
-    status_text = (
-        f"🤖 <b>Bot Status</b>\n\n"
-        f"Subscribed: {'✅ Yes' if is_subscribed else '❌ No'}\n"
-        f"Total subscribers: {get_subscriber_count()}\n"
-        f"Last check: {last_check}\n"
-        f"Next check: {next_check}"
+    lang = chat_language(update, context)
+    status_text = messages.status(
+        lang,
+        is_subscribed=is_subscriber(chat_id),
+        total=get_subscriber_count(),
+        last_check_at=last_check_at,
+        last_result=last_check_result,
+        next_check_at=next_check_at,
+        now=datetime.now(),
     )
-
     await update.message.reply_text(status_text, parse_mode='HTML')
+
+
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lang = chat_language(update, context)
+    await update.message.reply_text(messages.choose_language(lang), reply_markup=LANGUAGE_KEYBOARD)
+
+
+async def language_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    lang = query.data.split(':', 1)[1]
+    if lang not in LANGUAGES:
+        return
+    chat_id = update.effective_chat.id
+    set_language(chat_id, lang)
+    context.chat_data['language'] = lang
+    # Show this chat's menu in the chosen language instead of the Telegram app language
+    await context.bot.set_my_commands(bot_commands(lang), scope=BotCommandScopeChat(chat_id))
+    await query.edit_message_text(messages.language_set(lang))
 
 
 async def post_init(application: Application):
     global bot_instance, check_task
     bot_instance = application.bot
 
-    await application.bot.set_my_commands(BOT_COMMANDS)
+    # The default menu is English; Telegram shows the others by the user's app language
+    await application.bot.set_my_commands(bot_commands(DEFAULT_LANGUAGE))
+    for lang in LANGUAGES:
+        if lang != DEFAULT_LANGUAGE:
+            await application.bot.set_my_commands(bot_commands(lang), language_code=lang)
     load_subscribers()
 
     check_task = asyncio.create_task(check_availability_loop())
@@ -296,6 +286,8 @@ def main():
     application.add_handler(CommandHandler("check", check_now))
     application.add_handler(CallbackQueryHandler(check_again, pattern="^check$"))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("language", language))
+    application.add_handler(CallbackQueryHandler(language_chosen, pattern="^lang:"))
 
     logger.info("Starting bot...")
     application.run_polling(drop_pending_updates=True)

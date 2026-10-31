@@ -36,12 +36,14 @@ python booking_monitor_bot.py
 - `/stop` - Unsubscribe from notifications
 - `/check` - Manually check availability now
 - `/status` - View bot status
+- `/language` - Change language (English, Polski, Русский, Українська, Беларуская)
 
 ## How It Works
 
 - Checks booking availability every 10-15 minutes
 - Notifies all subscribers when appointments become available
-- Persists subscriber list across restarts (stored in `subscribers.json`)
+- Persists subscriber list and each subscriber's language across restarts (stored in `subscribers.json`)
+- Uses the language of the user's Telegram app by default, if it's one of the supported ones
 - Logs all activity to console
 
 ## Notes
