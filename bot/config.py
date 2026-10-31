@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 # Qmatic web booking of the Gdansk voivodeship office. The branch is the office,
 # the service is the appointment type
 BOOKING_BASE_URL = "https://rezerwacja.gdansk.uw.gov.pl:8445/qmaticwebbooking"
@@ -26,11 +28,11 @@ class Config:
 
 
 def load() -> Config:
-    load_dotenv()
+    load_dotenv(PROJECT_ROOT / '.env')
     token = os.getenv('TELEGRAM_BOT_TOKEN')
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable is not set")
     return Config(
         telegram_bot_token=token,
-        subscribers_file=Path('subscribers.json'),
+        subscribers_file=PROJECT_ROOT / 'subscribers.json',
     )

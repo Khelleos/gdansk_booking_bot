@@ -39,13 +39,17 @@ class SubscriberStore:
             self._subscribers = {}
 
     def _save(self):
+        # Write a temporary file and swap it in, so a crash mid-write can't leave
+        # a broken file that would load as no subscribers
+        tmp_path = f"{self.path}.tmp"
         try:
-            with open(self.path, 'w') as f:
+            with open(tmp_path, 'w') as f:
                 json.dump(
                     {'subscribers': [{'id': chat_id, 'language': lang}
                                      for chat_id, lang in self._subscribers.items()]},
                     f
                 )
+            os.replace(tmp_path, self.path)
             logger.info(f"Saved {len(self._subscribers)} subscribers to file")
         except Exception as e:
             logger.error(f"Error saving subscribers: {e}")
