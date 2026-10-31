@@ -2,7 +2,7 @@ from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.config import BOOKING_SITE_URL
 from bot.i18n import messages
-from bot.i18n.translations import LANGUAGES
+from bot.i18n.locales import LANGUAGES
 
 CHECK_CALLBACK = "check"
 LANGUAGE_CALLBACK_PREFIX = "lang:"

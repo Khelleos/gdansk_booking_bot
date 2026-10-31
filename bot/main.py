@@ -3,7 +3,7 @@ import logging
 from telegram.ext import Application
 
 from bot import config, handlers
-from bot.i18n.translations import DEFAULT_LANGUAGE, LANGUAGES
+from bot.i18n.locales import DEFAULT_LANGUAGE, LANGUAGES
 from bot.keyboards import bot_commands
 from bot.monitor import Monitor
 from bot.qmatic import QmaticClient

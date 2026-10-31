@@ -10,7 +10,7 @@ from telegram import BotCommandScopeChat, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
 from bot.i18n import messages
-from bot.i18n.translations import LANGUAGES
+from bot.i18n.locales import LANGUAGES
 from bot.keyboards import (
     CHECK_CALLBACK,
     LANGUAGE_CALLBACK_PREFIX,

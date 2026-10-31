@@ -2,7 +2,7 @@ import logging
 import os
 import json
 
-from bot.i18n.translations import DEFAULT_LANGUAGE
+from bot.i18n.locales import DEFAULT_LANGUAGE
 
 logger = logging.getLogger(__name__)
 

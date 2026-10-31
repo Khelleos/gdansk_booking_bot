@@ -2,7 +2,7 @@
 import html
 from datetime import datetime
 
-from bot.i18n.translations import DEFAULT_LANGUAGE, LANGUAGES, MONTHS, STRINGS, WEEKDAYS
+from bot.i18n.locales import DEFAULT_LANGUAGE, LANGUAGES, MONTHS, STRINGS, WEEKDAYS
 
 # Telegram rejects messages over 4096 characters; leave room for the header and footer
 MAX_SLOTS_TEXT_LENGTH = 3500
