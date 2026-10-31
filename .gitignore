@@ -11,4 +11,5 @@ venv/
 
 # Runtime data
 subscribers.json
+subscribers.json.tmp
 
